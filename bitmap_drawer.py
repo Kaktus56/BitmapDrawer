@@ -14,8 +14,18 @@ from PIL import Image, ImageTk, ImageOps, ImageEnhance, ImageFilter
 from pynput.mouse import Button, Controller as MouseController
 from pynput import keyboard
 
+import ctypes
+from ctypes import wintypes
+
 import json, os
-CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".bitmap_drawer.json")
+def _app_dir():
+    """Папка, где лежит сам скрипт или собранный .exe."""
+    if getattr(sys, "frozen", False):
+        # PyInstaller onefile / onedir
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_PATH = os.path.join(_app_dir(), "bitmap_drawer.json")
 
 try:
     import numpy as np
@@ -184,41 +194,63 @@ class AreaWindow:
 
         if initial is None:
             initial = self._load_saved() or (300, 200, 800, 600)
+        x, y, w, h = initial
+        # Ещё один уровень защиты — уже на всякий случай
+        w = max(120, int(w))
+        h = max(120, int(h))
+        x = int(x)
+        y = int(y)
 
         self.win = tk.Toplevel(parent)
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
         self.win.configure(bg="#ff3b30")
-
-        x, y, w, h = initial
         self.win.geometry(f"{w}x{h}+{x}+{y}")
+        self.win.minsize(120, 120)
+
         try:
             self.win.attributes("-alpha", 0.45)
         except tk.TclError:
             pass
 
         # --- заголовок ---
-        bar = tk.Frame(self.win, bg="#1e1e1e", height=30)
-        bar.pack(fill="x")
-        bar.pack_propagate(False)
+        self.bar = tk.Frame(self.win, bg="#1e1e1e", height=30)
+        self.bar.pack(fill="x", side="top")
+        self.bar.pack_propagate(False)
 
-        title = tk.Label(bar, text="  ⠿  Bitmap Drawer",
+        self.size_lbl = tk.Label(self.bar, text="0×0",
+                                 bg="#1e1e1e", fg="#7db4ff",
+                                 font=("Consolas", 10, "bold"), padx=8)
+        self.size_lbl.pack(side="left", fill="y")
+
+        title = tk.Label(self.bar, text="  ⠿  Bitmap Drawer",
                          bg="#1e1e1e", fg="#eee",
                          font=("Segoe UI", 10, "bold"), cursor="fleur")
         title.pack(side="left", fill="y")
         title.bind("<ButtonPress-1>", self._move_start)
         title.bind("<B1-Motion>", self._move_drag)
-        bar.bind("<ButtonPress-1>", self._move_start)
-        bar.bind("<B1-Motion>", self._move_drag)
+        self.bar.bind("<ButtonPress-1>", self._move_start)
+        self.bar.bind("<B1-Motion>", self._move_drag)
 
-        tk.Button(bar, text="✕", command=self._cancel,
+        tk.Button(self.bar, text="✕", command=self._cancel,
                   bg="#1e1e1e", fg="#f66", bd=0, font=("Segoe UI", 12, "bold"),
                   activebackground="#2d333b", activeforeground="#f66",
                   cursor="hand2").pack(side="right", padx=6)
-        tk.Button(bar, text="Начать ▶", command=self._confirm,
-                  bg="#3d8bff", fg="white", bd=0, font=("Segoe UI", 9, "bold"),
+
+        # --- футер (сначала пакуем его снизу, чтобы тело заняло остаток) ---
+        self.footer = tk.Frame(self.win, bg="#1e1e1e", height=38)
+        self.footer.pack(fill="x", side="bottom")
+        self.footer.pack_propagate(False)
+
+        tk.Button(self.footer, text="▶  Начать", command=self._confirm,
+                  bg="#3d8bff", fg="white", bd=0,
+                  font=("Segoe UI", 10, "bold"),
                   activebackground="#5ca0ff", activeforeground="white",
-                  cursor="hand2", padx=10).pack(side="right", pady=3)
+                  cursor="hand2", padx=16).pack(side="left", padx=6, pady=4)
+
+        tk.Label(self.footer, text="Enter — старт  •  Esc / ПКМ — отмена",
+                 bg="#1e1e1e", fg="#888",
+                 font=("Segoe UI", 8)).pack(side="right", padx=8)
 
         # --- тело ---
         self.body = tk.Frame(self.win, bg="#3d8bff")
@@ -238,11 +270,24 @@ class AreaWindow:
         self.win.bind("<Button-3>", lambda e: self._cancel())
 
         self.win.update_idletasks()
+        self.win.protocol("WM_DELETE_WINDOW", self._cancel)
         self.win.deiconify()
+        self.win.after(50, self._update_size)  # после маппинга
         self.win.lift()
         self.win.focus_force()
         try:
             self.win.grab_set()
+        except tk.TclError:
+            pass
+
+
+    def _update_size(self):
+        try:
+            bar_h = self.bar.winfo_reqheight() or 30
+            footer_h = self.footer.winfo_reqheight() or 38
+            body_h = max(0, self.win.winfo_height() - bar_h - footer_h)
+            self.size_lbl.config(
+                text=f"{self.win.winfo_width()} × {body_h} px")
         except tk.TclError:
             pass
 
@@ -259,8 +304,8 @@ class AreaWindow:
         nx = wx + (e.x_root - sx)
         ny = wy + (e.y_root - sy)
         self.win.geometry(f"{ww}x{wh}+{nx}+{ny}")
+        self._update_size()
 
-    # ---- resize ----
     def _resize_start(self, e):
         self._drag = ("resize", e.x_root, e.y_root,
                       self.win.winfo_x(), self.win.winfo_y(),
@@ -270,9 +315,10 @@ class AreaWindow:
         if not self._drag or self._drag[0] != "resize":
             return
         _, sx, sy, wx, wy, ww, wh = self._drag
-        nw = max(40, ww + (e.x_root - sx))
-        nh = max(40, wh + (e.y_root - sy))
+        nw = max(60, ww + (e.x_root - sx))
+        nh = max(60, wh + (e.y_root - sy))
         self.win.geometry(f"{nw}x{nh}+{wx}+{wy}")
+        self._update_size()
 
     # ---- actions ----
     def _confirm(self):
@@ -280,10 +326,14 @@ class AreaWindow:
         y = self.win.winfo_y()
         w = self.win.winfo_width()
         h = self.win.winfo_height()
-        # Отсекаем заголовок
-        bar_h = self.win.winfo_children()[0].winfo_height()
+        bar_h = self.bar.winfo_reqheight() or 30
+        footer_h = self.footer.winfo_reqheight() or 38
         y += bar_h
-        h -= bar_h
+        h -= (bar_h + footer_h)
+        if w < 20 or h < 20:
+            messagebox.showwarning("Мало места",
+                                   "Область рисования слишком маленькая.")
+            return
         self.result = (x, y, w, h)
         self._save_saved(self.result)
         self._close()
@@ -309,7 +359,10 @@ class AreaWindow:
                 d = json.load(f)
             a = d.get("area")
             if a and len(a) == 4:
-                return tuple(a)
+                x, y, w, h = (int(v) for v in a)
+                # Защита от битых сохранений (w/h <= 0 — мусор от старых версий)
+                if w >= 100 and h >= 100:
+                    return (x, y, w, h)
         except Exception:
             pass
         return None
@@ -577,13 +630,111 @@ def plan_flood(matrix, max_pixels=40000):
         strokes.append(_compress(stroke))
     return strokes
 
+# ============================================================================
+#  Низкоуровневый SendInput-мышиный бэкенд (Windows)
+# ============================================================================
+import ctypes
+from ctypes import wintypes
+
+
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_void_p),
+    ]
+
+
+class _INPUT(ctypes.Structure):
+    class _U(ctypes.Union):
+        _fields_ = [("mi", _MOUSEINPUT)]
+    _anonymous_ = ("u",)
+    _fields_ = [("type", wintypes.DWORD), ("u", _U)]
+
+
+_INPUT_MOUSE = 0
+_ME_MOVE = 0x0001
+_ME_ABS = 0x8000
+_ME_VIRTUALDESK = 0x4000
+_ME_LDOWN = 0x0002
+_ME_LUP = 0x0004
+
+
+class WinMouse:
+    """Все события мыши через SendInput → гарантированный порядок."""
+
+    def __init__(self):
+        self._u = ctypes.windll.user32
+
+    def _vmetrics(self):
+        u = self._u
+        return (u.GetSystemMetrics(76), u.GetSystemMetrics(77),
+                u.GetSystemMetrics(78), u.GetSystemMetrics(79))
+
+    def _to_abs(self, x, y):
+        vx, vy, vw, vh = self._vmetrics()
+        nx = int(round((x - vx) * 65535.0 / max(1, vw - 1)))
+        ny = int(round((y - vy) * 65535.0 / max(1, vh - 1)))
+        return max(0, min(65535, nx)), max(0, min(65535, ny))
+
+    def _mk(self, dx, dy, flags):
+        inp = _INPUT()
+        inp.type = _INPUT_MOUSE
+        inp.mi = _MOUSEINPUT(dx, dy, 0, flags, 0, None)
+        return inp
+
+    def _send(self, *inputs):
+        n = len(inputs)
+        arr = (_INPUT * n)(*inputs)
+        return self._u.SendInput(n, arr, ctypes.sizeof(_INPUT))
+
+    def move(self, x, y):
+        nx, ny = self._to_abs(x, y)
+        self._send(self._mk(nx, ny, _ME_MOVE | _ME_ABS | _ME_VIRTUALDESK))
+
+    def left_down(self):
+        self._send(self._mk(0, 0, _ME_LDOWN))
+
+    def left_up(self):
+        self._send(self._mk(0, 0, _ME_LUP))
+
+    def position(self):
+        pt = wintypes.POINT()
+        self._u.GetCursorPos(ctypes.byref(pt))
+        return (pt.x, pt.y)
+
+
+class PynputMouse:
+    """Fallback для не-Windows."""
+
+    def __init__(self):
+        self._m = MouseController()
+
+    def move(self, x, y):
+        self._m.position = (x, y)
+
+    def left_down(self):
+        self._m.press(Button.left)
+
+    def left_up(self):
+        self._m.release(Button.left)
+
+    def position(self):
+        return self._m.position
+
+
+def make_mouse():
+    return WinMouse() if sys.platform == "win32" else PynputMouse()
 
 # ============================================================================
 #  Рисователь
 # ============================================================================
 class Drawer:
     def __init__(self):
-        self.mouse = MouseController()
+        self._m = make_mouse()
         self.stop_flag = False
         self._listener = None
 
@@ -609,27 +760,23 @@ class Drawer:
     def _clamp(x, y, x0, y0, w, h):
         return max(x0, min(x0 + w - 1, x)), max(y0, min(y0 + h - 1, y))
 
-    def _move_to(self, x, y):
-        """Абсолютное перемещение через относительный move (SendInput-очередь)."""
-        try:
-            cx, cy = self.mouse.position
-        except Exception:
-            self.mouse.position = (x, y)
-            return
-        dx, dy = x - cx, y - cy
-        if dx or dy:
-            self.mouse.move(dx, dy)
+    def _settle(self):
+        """Небольшой «вдох» после каждого события — чтобы очередь успела разгрузиться."""
+        time.sleep(0.005)
 
+    # ---------- click ----------
     def draw_click(self, matrix, area, delay, on_progress=None):
         x0, y0, w, h = area
         H, W = len(matrix), len(matrix[0])
         cw, ch = w / W, h / H
-        click_delay = max(delay, 0.02)
+        d = max(delay, 0.02)
+
         try:
-            self.mouse.release(Button.left)
+            self._m.left_up()
         except Exception:
             pass
-        time.sleep(0.05)
+        time.sleep(0.1)
+
         self._start_listener()
         try:
             for y in range(H):
@@ -642,32 +789,33 @@ class Drawer:
                         sx = int(x0 + (x + 0.5) * cw)
                         sy = int(y0 + (y + 0.5) * ch)
                         sx, sy = self._clamp(sx, sy, x0, y0, w, h)
-                        self._move_to(sx, sy)
-                        time.sleep(click_delay)
-                        self.mouse.press(Button.left)
-                        time.sleep(click_delay)
-                        self.mouse.release(Button.left)
-                        time.sleep(click_delay)
+                        self._m.move(sx, sy)
+                        time.sleep(d)
+                        self._m.left_down()
+                        time.sleep(d)
+                        self._m.left_up()
+                        time.sleep(d)
                 if on_progress:
                     on_progress((y + 1) / H)
         finally:
             try:
-                self.mouse.release(Button.left)
+                self._m.left_up()
             except Exception:
                 pass
             self._stop_listener()
 
+    # ---------- polyline ----------
     def draw_polyline(self, strokes, W, H, area, delay, on_progress=None):
         x0, y0, w, h = area
         cw, ch = w / W, h / H
-        step_delay = max(delay * 0.5, 0.002)
-        settle = max(delay, 0.03)
+        step = max(delay * 0.5, 0.002)
+        settle = max(delay, 0.02)
 
         try:
-            self.mouse.release(Button.left)
+            self._m.left_up()
         except Exception:
             pass
-        time.sleep(0.05)
+        time.sleep(0.1)
 
         total_pts = sum(len(s) for s in strokes) or 1
         done = 0
@@ -682,9 +830,9 @@ class Drawer:
                 sy = int(y0 + (py + 0.5) * ch)
                 sx, sy = self._clamp(sx, sy, x0, y0, w, h)
 
-                self._move_to(sx, sy)
+                self._m.move(sx, sy)
                 time.sleep(settle)
-                self.mouse.press(Button.left)
+                self._m.left_down()
                 time.sleep(settle)
 
                 for i in range(1, len(stroke)):
@@ -694,36 +842,36 @@ class Drawer:
                     nsx = int(x0 + (nx + 0.5) * cw)
                     nsy = int(y0 + (ny + 0.5) * ch)
                     nsx, nsy = self._clamp(nsx, nsy, x0, y0, w, h)
-                    self._drag_to(sx, sy, nsx, nsy, step_delay)
+                    self._drag(sx, sy, nsx, nsy, step)
                     sx, sy = nsx, nsy
                     done += 1
                     if on_progress:
                         on_progress(min(1.0, done / total_pts))
 
                 time.sleep(settle)
-                self.mouse.release(Button.left)
+                self._m.left_up()
                 time.sleep(settle)
                 done += 1
         finally:
             try:
-                self.mouse.release(Button.left)
+                self._m.left_up()
             except Exception:
                 pass
             self._stop_listener()
 
-    def _drag_to(self, x1, y1, x2, y2, step_delay):
+    def _drag(self, x1, y1, x2, y2, step):
         dx, dy = x2 - x1, y2 - y1
-        steps = max(abs(dx), abs(dy))
-        if steps == 0:
+        n = max(abs(dx), abs(dy))
+        if n == 0:
             return
-        for i in range(1, steps + 1):
+        for i in range(1, n + 1):
             if self.stop_flag:
                 return
-            t = i / steps
+            t = i / n
             x = int(round(x1 + dx * t))
             y = int(round(y1 + dy * t))
-            self._move_to(x, y)
-            time.sleep(step_delay)
+            self._m.move(x, y)
+            time.sleep(step)
 
 
 # ============================================================================
@@ -810,7 +958,6 @@ class App:
         self.drawing = False
 
         self.drawer = Drawer()
-        self.selector = AreaWindow(self.root)
         self.overlay = ProgressOverlay(self.root)
 
         self._build_ui()
@@ -1245,9 +1392,9 @@ class App:
         delay = max(float(self.var_delay.get()), 0.02)
 
         def worker():
-            m = self.drawer.mouse
+            m = self.drawer._m          # новый бэкенд WinMouse
             try:
-                m.release(Button.left)
+                m.left_up()
             except Exception:
                 pass
             time.sleep(0.3)
@@ -1257,11 +1404,11 @@ class App:
                    (x0 + w // 2, y0 + h // 4),
                    (x0 + w // 2, y0 + 3 * h // 4)]
             for x, y in pts:
-                m.position = (x, y)
+                m.move(x, y)
                 time.sleep(delay)
-                m.press(Button.left)
+                m.left_down()
                 time.sleep(delay)
-                m.release(Button.left)
+                m.left_up()
                 time.sleep(delay)
             self.root.after(0, self.root.deiconify)
 
