@@ -1,1 +1,29 @@
-{"area": [3817, 793, 372, 325]}
+{
+  "area": [
+    81,
+    340,
+    250,
+    250
+  ],
+  "state": {
+    "rotate": 0,
+    "fill_white": true,
+    "threshold": 70,
+    "brightness": 111,
+    "contrast": 250,
+    "saturate": 106,
+    "blur": 0.0,
+    "sobel": 0.0,
+    "edges": true,
+    "dither": true,
+    "median": false,
+    "invert": false,
+    "smooth": true,
+    "mode": "flood",
+    "smart_chain": false,
+    "delay": 0.0005,
+    "editor": true,
+    "w": 200,
+    "h": 250
+  }
+}

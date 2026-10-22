@@ -205,7 +205,7 @@ class AreaWindow:
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
         self.win.configure(bg="#ff3b30")
-        self.win.geometry(f"{w}x{h}+{x}+{y}")
+        self.win.geometry(f"{w}x{h + 68}+{x}+{y}")
         self.win.minsize(120, 120)
 
         try:
@@ -528,7 +528,7 @@ def _compress(stroke):
     return out
 
 
-def plan_flood(matrix, max_pixels=40000):
+def plan_flood(matrix, max_pixels=200000):
     """
     Обход связных компонент с проходом через уже нарисованные пиксели.
     Алгоритм:
@@ -951,17 +951,34 @@ class App:
         self.root.geometry("1220x820")
         self.root.minsize(900, 600)
 
+        self.base_bitmap = None       # numpy bool — результат фильтров
+        self.edit_layer = None        # 2D список None/True/False
+        self._preview_offset = (0, 0)
+        self._preview_scale = 1
+        self._preview_size = (0, 0)
+        self.var_editor = tk.BooleanVar(value=False)
+        self.var_smooth = tk.BooleanVar(value=False)
+
         self.src_image = None
         self.bw_image = None
         self.bitmap = None
         self.preview_photo = None
         self.drawing = False
+        self._warn_text = tk.StringVar(value="")
 
         self.drawer = Drawer()
         self.overlay = ProgressOverlay(self.root)
 
         self._build_ui()
+
+        self._load_state()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
         self.root.bind("<Configure>", lambda e: self._render_preview())
+
+    def _on_close(self):
+        self._save_state()
+        self.root.destroy()
 
     def _labeled_slider(self, parent, label, var, lo, hi, fmt="{:.0f}", integer=False):
         head = ttk.Frame(parent);
@@ -1031,6 +1048,10 @@ class App:
                                 highlightbackground="#333")
         self.canvas.pack(fill="both", expand=True, pady=(4, 0))
         self.canvas.bind("<Configure>", lambda e: self._render_preview())
+        self.canvas.bind("<Button-1>", self._canvas_paint)
+        self.canvas.bind("<B1-Motion>", self._canvas_paint)
+        self.canvas.bind("<Button-3>", self._canvas_erase)
+        self.canvas.bind("<B3-Motion>", self._canvas_erase)
 
         sf = ScrollFrame(main, width=330)
         sf.pack(side="right", fill="y", padx=(10, 0))
@@ -1056,7 +1077,7 @@ class App:
         self.var_rotate = tk.IntVar(value=0)
         self._labeled_slider(r, "Поворот", self.var_rotate, -180, 180, "{:.0f}°", integer=True)
         self.var_fill_white = tk.BooleanVar(value=False)
-        self._labeled_check(r, "Белый фон при повороте", self.var_fill_white)
+        self._labeled_check(r, "Белый фон (PNG и поворот)", self.var_fill_white)
 
         self.var_threshold = tk.IntVar(value=128)
         self._labeled_slider(r, "Порог", self.var_threshold, 0, 255, "{:.0f}", integer=True)
@@ -1077,8 +1098,22 @@ class App:
         self._labeled_check(r, "Dithering (FS)", self.var_dither)
         self.var_median = tk.BooleanVar(value=False)
         self._labeled_check(r, "Median edges", self.var_median)
+        self.var_smooth = tk.BooleanVar(value=False)
+        self._labeled_check(r, "Сгладить шум (median 3×3)", self.var_smooth)
         self.var_invert = tk.BooleanVar(value=False)
         self._labeled_check(r, "Инвертировать изображение", self.var_invert)
+
+        ttk.Separator(r).pack(fill="x", padx=4, pady=8)
+        ttk.Label(r, text="Редактор").pack(anchor="w", padx=4)
+
+        def _editor_toggle(*_):
+            self.canvas.config(cursor="crosshair"
+                               if self.var_editor.get() else "")
+        self.var_editor.trace_add("write", _editor_toggle)
+        ttk.Checkbutton(r, text="Редактор (ЛКМ — рисовать, ПКМ — стереть)",
+                        variable=self.var_editor).pack(anchor="w", padx=4)
+        ttk.Button(r, text="Очистить редактор",
+                   command=self._clear_editor).pack(fill="x", padx=4, pady=(4, 0))
 
         ttk.Button(r, text="Сбросить фильтры",
                    command=self._reset_filters).pack(fill="x", padx=4, pady=(8, 0))
@@ -1116,6 +1151,12 @@ class App:
         ttk.Checkbutton(r, text="Smart: склеивать runs в один штрих",
                         variable=self.var_smart_chain).pack(anchor="w", padx=4)
 
+        self.warn_lbl = ttk.Label(r, textvariable=self._warn_text,
+                                  foreground="#e6954b",
+                                  wraplength=300,
+                                  font=("Segoe UI", 9, "italic"))
+        self.warn_lbl.pack(anchor="w", padx=4, pady=(4, 0))
+
         self.var_delay = tk.DoubleVar(value=0.002)
         self._labeled_slider(r, "Задержка", self.var_delay, 0.0005, 0.05,
                              "{:.4f} s")
@@ -1127,6 +1168,9 @@ class App:
                    command=self._preview_path).pack(side="left", fill="x", expand=True, padx=(0, 2))
         ttk.Button(row, text="Тест: 5 точек",
                    command=self._test_draw).pack(side="left", fill="x", expand=True, padx=(2, 0))
+        row = ttk.Frame(r); row.pack(fill="x", padx=4, pady=(4, 0))
+        ttk.Button(row, text="Область по размеру картинки",
+                   command=self._open_area_with_image_size).pack(fill="x")
 
         self.btn_draw = ttk.Button(r, text="Выбрать область и рисовать",
                                    command=self.start_draw)
@@ -1139,6 +1183,10 @@ class App:
                        "и включите инструмент «карандаш 1 px».",
                   foreground="#888", justify="left",
                   wraplength=300).pack(anchor="w", padx=4, pady=(8, 8))
+
+        self.var_dither.trace_add("write", lambda *_: self._refresh_warnings())
+        self.var_mode.trace_add("write", lambda *_: self._refresh_warnings())
+        self._refresh_warnings()
 
         self._on_fit_toggle()
 
@@ -1164,6 +1212,8 @@ class App:
         self.var_blur.set(0.0); self.var_sobel.set(0.0)
         self.var_edges.set(False); self.var_dither.set(False)
         self.var_median.set(False); self.var_invert.set(False)
+        self.var_smooth.set(False)
+        self._clear_editor()
         self._update_bitmap()
 
     def load_image(self):
@@ -1174,11 +1224,29 @@ class App:
         if not path:
             return
         try:
-            self.src_image = Image.open(path).convert("RGB")
+            img = Image.open(path)
+            img.load()
         except Exception as e:
             messagebox.showerror("Ошибка", str(e))
             return
+        # Сохраняем альфу, если есть — понадобится при смене фона
+        if img.mode in ("RGBA", "LA") or (
+                img.mode == "P" and "transparency" in img.info):
+            self.src_image = img.convert("RGBA")
+        else:
+            self.src_image = img.convert("RGB")
         self._update_bitmap()
+
+    def _flatten_src(self):
+        """Накладывает PNG с альфой на фон (белый/чёрный по галочке)."""
+        if self.src_image is None:
+            return None
+        bg = (255, 255, 255) if self.var_fill_white.get() else (0, 0, 0)
+        if self.src_image.mode == "RGBA":
+            base = Image.new("RGBA", self.src_image.size, bg + (255,))
+            base.paste(self.src_image, (0, 0), self.src_image)
+            return base.convert("RGB")
+        return self.src_image.copy()
 
     def _update_bitmap(self, *_):
         if not self.src_image:
@@ -1189,7 +1257,7 @@ class App:
         except (tk.TclError, ValueError, TypeError):
             return
 
-        img = self.src_image.copy()
+        img = self._flatten_src()
         rot = int(self.var_rotate.get())
         if rot:
             fill = (255, 255, 255) if self.var_fill_white.get() else (0, 0, 0)
@@ -1233,10 +1301,15 @@ class App:
             arr = _median_edge(arr)
 
         drawn = arr < 128
-        preview_arr = np.where(drawn, 0, 255).astype(np.uint8)
-        self.bw_image = Image.fromarray(preview_arr, "L")
-        self.bitmap = drawn.tolist()
-        self._render_preview()
+        if self.var_smooth.get():
+            drawn = self._smooth_noise(drawn)
+        self.base_bitmap = drawn
+        H_, W_ = self.base_bitmap.shape
+        if (self.edit_layer is None
+                or len(self.edit_layer) != H_
+                or len(self.edit_layer[0]) != W_):
+            self.edit_layer = [[None] * W_ for _ in range(H_)]
+        self._apply_edits()
 
     def _render_preview(self):
         if not self.bw_image:
@@ -1254,6 +1327,27 @@ class App:
         self.canvas.delete("all")
         self.canvas.create_image(cw // 2, ch // 2,
                                  image=self.preview_photo, anchor="center")
+        # сохраняем метрики для редактора
+        self._preview_size = (W, H)
+        self._preview_scale = scale
+        self._preview_offset = ((cw - W * scale) // 2,
+                                (ch - H * scale) // 2)
+
+    def _refresh_warnings(self, *_):
+        parts = []
+        if self.var_mode.get() == "flood" and self.var_dither.get():
+            parts.append("Dithering + Flood — медленно и неэффективно. Лучше Snake или Smart")
+        if self.var_smooth.get() and self.var_dither.get():
+            parts.append("Dithering + Сгладить — смажет узор.")
+        self._warn_text.set(("⚠ " + "  •  ".join(parts)) if parts else "")
+
+    @staticmethod
+    def _smooth_noise(drawn):
+        """Median 3×3 по бинарной маске: чистит изолированные точки,
+        заполняет одиночные дырки, не замыливая крупные формы."""
+        img = Image.fromarray((drawn * 255).astype(np.uint8), "L")
+        img = img.filter(ImageFilter.MedianFilter(3))
+        return np.asarray(img) > 127
 
     def start_draw(self):
         if not self.bitmap:
@@ -1379,13 +1473,26 @@ class App:
               f"total points={total}, "
               f"avg per stroke={total / len(strokes):.1f}")
 
+    def _open_area_with_image_size(self):
+        if not self.bitmap:
+            messagebox.showinfo("Инфо", "Сначала загрузите изображение.")
+            return
+        H = len(self.bitmap); W = len(self.bitmap[0])
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        win_h = H + 68
+        x = max(0, (sw - W) // 2)
+        y = max(0, (sh - win_h) // 2)
+        AreaWindow(self.root, initial=(x, y, W, H)).select()
+
     def _test_draw(self):
         selector = AreaWindow(self.root)
         area = selector.select()
         if not area:
             return
         self.root.withdraw()
-        self.root.after(200, lambda: self._test_draw_run(area))
+        self.root.after(200, lambda: self._countdown(
+            3, lambda: self._test_draw_run(area)))
 
     def _test_draw_run(self, area):
         x0, y0, w, h = area
@@ -1414,11 +1521,139 @@ class App:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _apply_edits(self):
+        """Мержит base_bitmap + edit_layer в self.bitmap и обновляет превью."""
+        if self.base_bitmap is None:
+            return
+        merged = self.base_bitmap.copy()
+        H, W = merged.shape
+        for y in range(H):
+            row = self.edit_layer[y]
+            for x in range(W):
+                v = row[x]
+                if v is not None:
+                    merged[y, x] = v
+        self.bitmap = merged.tolist()
+        preview_arr = np.where(merged, 0, 255).astype(np.uint8)
+        self.bw_image = Image.fromarray(preview_arr, "L")
+        self._render_preview()
+
+    def _clear_editor(self):
+        if self.edit_layer is None:
+            return
+        for row in self.edit_layer:
+            for i in range(len(row)):
+                row[i] = None
+        self._apply_edits()
+
+    def _canvas_set_pixel(self, cx, cy, value):
+        if self.base_bitmap is None or self.edit_layer is None:
+            return
+        ox, oy = self._preview_offset
+        scale = self._preview_scale
+        if scale < 1:
+            return
+        px = (cx - ox) // scale
+        py = (cy - oy) // scale
+        W, H = self._preview_size
+        if not (0 <= px < W and 0 <= py < H):
+            return
+        # уже так? — не трогаем
+        if self.edit_layer[py][px] == value:
+            return
+        # если значение совпадает с base — снимаем override
+        if bool(self.base_bitmap[py, px]) == value:
+            self.edit_layer[py][px] = None
+        else:
+            self.edit_layer[py][px] = value
+        self._apply_edits()
+
+    def _canvas_paint(self, e):
+        if not self.var_editor.get() or not self.bitmap:
+            return
+        self._canvas_set_pixel(e.x, e.y, True)
+
+    def _canvas_erase(self, e):
+        if not self.var_editor.get() or not self.bitmap:
+            return
+        self._canvas_set_pixel(e.x, e.y, False)
+
     def _draw_done(self):
         self.overlay.hide()
         self.progress["value"] = 0
         self.drawing = False
         self.root.deiconify()
+
+    def _save_state(self):
+        state = {
+            "rotate": int(self.var_rotate.get()),
+            "fill_white": bool(self.var_fill_white.get()),
+            "threshold": int(self.var_threshold.get()),
+            "brightness": int(self.var_brightness.get()),
+            "contrast": int(self.var_contrast.get()),
+            "saturate": int(self.var_saturate.get()),
+            "blur": float(self.var_blur.get()),
+            "sobel": float(self.var_sobel.get()),
+            "edges": bool(self.var_edges.get()),
+            "dither": bool(self.var_dither.get()),
+            "median": bool(self.var_median.get()),
+            "invert": bool(self.var_invert.get()),
+            "smooth": bool(self.var_smooth.get()),
+            "mode": self.var_mode.get(),
+            "smart_chain": bool(self.var_smart_chain.get()),
+            "delay": float(self.var_delay.get()),
+            "editor": bool(self.var_editor.get()),
+            "w": int(self.var_w.get()),
+            "h": int(self.var_h.get()),
+        }
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            d = {}
+        d["state"] = state
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(d, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _load_state(self):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            return
+        s = d.get("state")
+        if not isinstance(s, dict):
+            return
+        mapping = [
+            (self.var_rotate, "rotate", int),
+            (self.var_fill_white, "fill_white", bool),
+            (self.var_threshold, "threshold", int),
+            (self.var_brightness, "brightness", int),
+            (self.var_contrast, "contrast", int),
+            (self.var_saturate, "saturate", int),
+            (self.var_blur, "blur", float),
+            (self.var_sobel, "sobel", float),
+            (self.var_edges, "edges", bool),
+            (self.var_dither, "dither", bool),
+            (self.var_median, "median", bool),
+            (self.var_invert, "invert", bool),
+            (self.var_smooth, "smooth", bool),
+            (self.var_mode, "mode", str),
+            (self.var_smart_chain, "smart_chain", bool),
+            (self.var_delay, "delay", float),
+            (self.var_editor, "editor", bool),
+            (self.var_w, "w", int),
+            (self.var_h, "h", int),
+        ]
+        for var, key, conv in mapping:
+            if key in s:
+                try:
+                    var.set(conv(s[key]))
+                except (ValueError, TypeError, tk.TclError):
+                    pass
 
     def run(self):
         self.root.mainloop()
