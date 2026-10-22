@@ -25,7 +25,6 @@ def _app_dir():
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
-CONFIG_PATH = os.path.join(_app_dir(), "bitmap_drawer.json")
 
 try:
     import numpy as np
@@ -43,6 +42,134 @@ if sys.platform == "win32":
             windll.user32.SetProcessDPIAware()
         except Exception:
             pass
+
+
+CONFIG_PATH = os.path.join(_app_dir(), "bitmap_drawer.json")
+
+LANG_PATH = os.path.join(_app_dir(), "lang.json")
+# --- Настраиваемые параметры ---
+PARAM_DEFAULTS = {
+    "flood_max_pixels": 200000,
+    "smart_ordered_max_runs": 4000,
+    "smart_chain_max_runs": 2500,
+    "min_step_delay_ms": 2,
+    "min_click_settle_ms": 20,
+    "countdown_seconds": 3,
+    "zoom_max": 32,
+}
+PARAM_LIMITS = {           # (минимум, максимум)
+    "flood_max_pixels": (1000, 100_000_000),
+    "smart_ordered_max_runs": (100, 1_000_000),
+    "smart_chain_max_runs": (100, 1_000_000),
+    "min_step_delay_ms": (1, 1000),
+    "min_click_settle_ms": (1, 5000),
+    "countdown_seconds": (0, 60),
+    "zoom_max": (1, 256),
+}
+PARAMS = dict(PARAM_DEFAULTS)
+
+def _load_params():
+    """Читает битый/отсутствующий конфиг безопасно; значения clamp'ятся."""
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return
+    p = d.get("params")
+    if not isinstance(p, dict):
+        return
+    for k, v in p.items():
+        if k not in PARAM_DEFAULTS:
+            continue
+        lo, hi = PARAM_LIMITS[k]
+        try:
+            iv = int(v)
+        except (ValueError, TypeError):
+            continue
+        PARAMS[k] = max(lo, min(hi, iv))
+
+DEFAULT_STRINGS = {
+    "app_title": "Bitmap Drawer",
+    "load_image": "Загрузить изображение…",
+    "rotate": "Поворот",
+    "fill_white": "Белый фон (PNG и поворот)",
+    "threshold": "Порог",
+    "brightness": "Яркость",
+    "contrast": "Контраст",
+    "saturate": "Насыщенность",
+    "blur": "Размытие",
+    "sobel": "Sobel",
+    "edges": "Усилить края",
+    "dither": "Dithering (FS)",
+    "median": "Median edges",
+    "smooth": "Сгладить шум (median 3×3)",
+    "invert": "Инвертировать изображение",
+    "reset_filters": "Сбросить фильтры",
+    "preview_section": "Превью",
+    "preview_bitmap": "Превью битмапа",
+    "fit_window": "Вписать в окно",
+    "zoom": "Масштаб",
+    "zoom_auto": "авто",
+    "editor_section": "Редактор",
+    "editor_mode": "Редактор (ЛКМ — рисовать, ПКМ — стереть)",
+    "clear_editor": "Очистить редактор",
+    "mode_click": "Click — точка за точкой",
+    "mode_snake": "Snake — змейкой (надёжно)",
+    "mode_smart": "Smart — с умным порядком",
+    "mode_flood": "Flood — обход через чёрное",
+    "smart_chain": "Smart: склеивать runs в один штрих",
+    "delay": "Задержка",
+    "show_path": "Показать путь",
+    "test_5dots": "Тест: 5 точек",
+    "area_by_size": "Область по размеру картинки",
+    "start_draw": "Выбрать область и рисовать",
+    "esc_hint": "ESC — аварийная остановка.\n"
+                "Перед выбором области откройте редактор\n"
+                "и включите инструмент «карандаш 1 px».",
+    "warn_dither_flood": "Dithering + Flood: дизеринг разбивает картинку на изолированные точки, обход медленный и неэффективный.",
+    "warn_dither_smooth": "Dithering + Сгладить: смажет узор.",
+    "area_title": "  ⠿  Bitmap Drawer",
+    "area_start": "▶  Начать",
+    "area_hint": "Enter — старт  •  Esc / ПКМ — отмена",
+    "countdown_0": "Старт через",
+    "countdown_1": "Переключитесь в редактор",
+    "progress_0": "Рисую…",
+    "progress_1": "•  ESC — стоп",
+    "info_title": "Инфо",
+    "error_title": "Ошибка",
+    "warn_title": "Мало места",
+    "need_image": "Сначала загрузите изображение.",
+    "small_area": "Область рисования слишком маленькая.",
+    "no_path_click": "Click рисует точки, для него нет траектории.",
+}
+
+
+class _Lang:
+    def __init__(self):
+        self._d = dict(DEFAULT_STRINGS)
+        try:
+            with open(LANG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            strings = data.get("strings") if isinstance(data, dict) else None
+            if isinstance(strings, dict):
+                for k, v in strings.items():
+                    if isinstance(v, str):
+                        self._d[k] = v
+        except Exception:
+            pass
+
+    def __call__(self, key, **kw):
+        s = self._d.get(key, key)
+        if kw:
+            try:
+                return s.format(**kw)
+            except Exception:
+                return s
+        return s
+
+
+LANG = _Lang()
+_load_params()
 
 
 # ============================================================================
@@ -223,7 +350,7 @@ class AreaWindow:
                                  font=("Consolas", 10, "bold"), padx=8)
         self.size_lbl.pack(side="left", fill="y")
 
-        title = tk.Label(self.bar, text="  ⠿  Bitmap Drawer",
+        title = tk.Label(self.bar, text=LANG("area_title"),
                          bg="#1e1e1e", fg="#eee",
                          font=("Segoe UI", 10, "bold"), cursor="fleur")
         title.pack(side="left", fill="y")
@@ -242,13 +369,13 @@ class AreaWindow:
         self.footer.pack(fill="x", side="bottom")
         self.footer.pack_propagate(False)
 
-        tk.Button(self.footer, text="▶  Начать", command=self._confirm,
+        tk.Button(self.footer, text=LANG("area_start"), command=self._confirm,
                   bg="#3d8bff", fg="white", bd=0,
                   font=("Segoe UI", 10, "bold"),
                   activebackground="#5ca0ff", activeforeground="white",
                   cursor="hand2", padx=16).pack(side="left", padx=6, pady=4)
 
-        tk.Label(self.footer, text="Enter — старт  •  Esc / ПКМ — отмена",
+        tk.Label(self.footer, text=LANG("area_hint"),
                  bg="#1e1e1e", fg="#888",
                  font=("Segoe UI", 8)).pack(side="right", padx=8)
 
@@ -331,8 +458,8 @@ class AreaWindow:
         y += bar_h
         h -= (bar_h + footer_h)
         if w < 20 or h < 20:
-            messagebox.showwarning("Мало места",
-                                   "Область рисования слишком маленькая.")
+            messagebox.showwarning(LANG("warn_title"),
+                                   LANG("small_area"))
             return
         self.result = (x, y, w, h)
         self._save_saved(self.result)
@@ -422,7 +549,7 @@ def plan_smart_ordered(matrix):
     runs = _find_runs(matrix)
     if not runs:
         return []
-    if len(runs) > 4000:
+    if len(runs) > PARAMS["smart_ordered_max_runs"]:
         return plan_snake(matrix)
 
     unvisited = list(range(len(runs)))
@@ -453,7 +580,7 @@ def plan_smart(matrix):
     runs = _find_runs(matrix)
     if not runs:
         return []
-    if len(runs) > 2500:
+    if len(runs) > PARAMS["smart_chain_max_runs"]:
         return plan_snake(matrix)
 
     from collections import defaultdict
@@ -540,6 +667,9 @@ def plan_flood(matrix, max_pixels=200000):
          Путь становится продолжением штриха (кисть НЕ отрывается).
       4. Когда вся компонента исчерпана — новый штрих.
     """
+    if max_pixels is None:
+        max_pixels = PARAMS["flood_max_pixels"]
+
     H, W = len(matrix), len(matrix[0])
     total = sum(1 for row in matrix for v in row if v)
     if total == 0:
@@ -769,7 +899,7 @@ class Drawer:
         x0, y0, w, h = area
         H, W = len(matrix), len(matrix[0])
         cw, ch = w / W, h / H
-        d = max(delay, 0.02)
+        d = max(delay, PARAMS["min_click_settle_ms"] / 1000.0)
 
         try:
             self._m.left_up()
@@ -808,7 +938,7 @@ class Drawer:
     def draw_polyline(self, strokes, W, H, area, delay, on_progress=None):
         x0, y0, w, h = area
         cw, ch = w / W, h / H
-        step = max(delay * 0.5, 0.002)
+        step = max(delay * 0.5, PARAMS["min_step_delay_ms"] / 1000.0)
         settle = max(delay, 0.02)
 
         try:
@@ -888,7 +1018,7 @@ class ProgressOverlay:
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
         self.win.configure(bg="#1e1e1e")
-        self.lbl = tk.Label(self.win, text="Рисую…  ESC — стоп",
+        self.lbl = tk.Label(self.win, text=LANG("progress_0")+"  "+LANG("progress_1"),
                             fg="#eee", bg="#1e1e1e",
                             font=("Arial", 11), padx=14, pady=8)
         self.lbl.pack()
@@ -898,7 +1028,7 @@ class ProgressOverlay:
 
     def set_progress(self, p):
         if self.lbl:
-            self.lbl.config(text=f"Рисую… {int(p * 100)}%  •  ESC — стоп")
+            self.lbl.config(text=LANG("progress_0")+f"  {int(p * 100)}%  "+LANG("progress_1"))
 
     def hide(self):
         if self.win:
@@ -947,7 +1077,7 @@ class ScrollFrame(ttk.Frame):
 class App:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Bitmap Drawer v0.4")
+        self.root.title(LANG("app_title") + " v0.5")
         self.root.geometry("1220x820")
         self.root.minsize(900, 600)
 
@@ -1043,7 +1173,7 @@ class App:
         main.pack(fill="both", expand=True)
 
         left = ttk.Frame(main); left.pack(side="left", fill="both", expand=True)
-        ttk.Label(left, text="Превью битмапа").pack(anchor="w")
+        ttk.Label(left, text=LANG("preview_bitmap")).pack(anchor="w")
         self.canvas = tk.Canvas(left, bg="#111", highlightthickness=1,
                                 highlightbackground="#333")
         self.canvas.pack(fill="both", expand=True, pady=(4, 0))
@@ -1057,7 +1187,7 @@ class App:
         sf.pack(side="right", fill="y", padx=(10, 0))
         r = sf.inner
 
-        ttk.Button(r, text="Загрузить изображение…",
+        ttk.Button(r, text=LANG("load_image"),
                    command=self.load_image).pack(fill="x", padx=4, pady=(4, 0))
 
         row = ttk.Frame(r); row.pack(fill="x", padx=4, pady=(8, 0))
@@ -1075,62 +1205,63 @@ class App:
         ttk.Separator(r).pack(fill="x", padx=4, pady=8)
 
         self.var_rotate = tk.IntVar(value=0)
-        self._labeled_slider(r, "Поворот", self.var_rotate, -180, 180, "{:.0f}°", integer=True)
+        self._labeled_slider(r, LANG("rotate"), self.var_rotate, -180, 180, "{:.0f}°", integer=True)
         self.var_fill_white = tk.BooleanVar(value=False)
-        self._labeled_check(r, "Белый фон (PNG и поворот)", self.var_fill_white)
+        self._labeled_check(r, LANG("fill_white"), self.var_fill_white)
 
         self.var_threshold = tk.IntVar(value=128)
-        self._labeled_slider(r, "Порог", self.var_threshold, 0, 255, "{:.0f}", integer=True)
+        self._labeled_slider(r, LANG("threshold"), self.var_threshold, 0, 255, "{:.0f}", integer=True)
         self.var_brightness = tk.IntVar(value=100)
-        self._labeled_slider(r, "Яркость", self.var_brightness, 0, 250, "{:.0f}%", integer=True)
+        self._labeled_slider(r, LANG("brightness"), self.var_brightness, 0, 250, "{:.0f}%", integer=True)
         self.var_contrast = tk.IntVar(value=100)
-        self._labeled_slider(r, "Контраст", self.var_contrast, 0, 250, "{:.0f}%", integer=True)
+        self._labeled_slider(r, LANG("contrast"), self.var_contrast, 0, 250, "{:.0f}%", integer=True)
         self.var_saturate = tk.IntVar(value=100)
-        self._labeled_slider(r, "Насыщенность", self.var_saturate, 0, 250, "{:.0f}%", integer=True)
+        self._labeled_slider(r, LANG("saturate"), self.var_saturate, 0, 250, "{:.0f}%", integer=True)
         self.var_blur = tk.DoubleVar(value=0.0)
-        self._labeled_slider(r, "Размытие", self.var_blur, 0.0, 3.0, "{:.2f} px", integer=True)
+        self._labeled_slider(r, LANG("blur"), self.var_blur, 0.0, 3.0, "{:.2f} px", integer=True)
         self.var_sobel = tk.DoubleVar(value=0.0)
-        self._labeled_slider(r, "Sobel", self.var_sobel, 0.0, 1.0, "{:.2f}", integer=True)
+        self._labeled_slider(r, LANG("sobel"), self.var_sobel, 0.0, 1.0, "{:.2f}", integer=True)
 
         self.var_edges = tk.BooleanVar(value=False)
-        self._labeled_check(r, "Усилить края", self.var_edges)
+        self._labeled_check(r, LANG("edges"), self.var_edges)
         self.var_dither = tk.BooleanVar(value=False)
-        self._labeled_check(r, "Dithering (FS)", self.var_dither)
+        self._labeled_check(r, LANG("dither"), self.var_dither)
         self.var_median = tk.BooleanVar(value=False)
-        self._labeled_check(r, "Median edges", self.var_median)
+        self._labeled_check(r, LANG("median"), self.var_median)
         self.var_smooth = tk.BooleanVar(value=False)
-        self._labeled_check(r, "Сгладить шум (median 3×3)", self.var_smooth)
+        self._labeled_check(r, LANG("smooth"), self.var_smooth)
         self.var_invert = tk.BooleanVar(value=False)
-        self._labeled_check(r, "Инвертировать изображение", self.var_invert)
+        self._labeled_check(r, LANG("invert"), self.var_invert)
 
         ttk.Separator(r).pack(fill="x", padx=4, pady=8)
-        ttk.Label(r, text="Редактор").pack(anchor="w", padx=4)
+        ttk.Label(r, text=LANG("editor_section")).pack(anchor="w", padx=4)
 
         def _editor_toggle(*_):
             self.canvas.config(cursor="crosshair"
                                if self.var_editor.get() else "")
         self.var_editor.trace_add("write", _editor_toggle)
-        ttk.Checkbutton(r, text="Редактор (ЛКМ — рисовать, ПКМ — стереть)",
+        ttk.Checkbutton(r, text=LANG("editor_mode"),
                         variable=self.var_editor).pack(anchor="w", padx=4)
-        ttk.Button(r, text="Очистить редактор",
+        ttk.Button(r, text=LANG("clear_editor"),
                    command=self._clear_editor).pack(fill="x", padx=4, pady=(4, 0))
 
-        ttk.Button(r, text="Сбросить фильтры",
+        ttk.Button(r, text=LANG("reset_filters"),
                    command=self._reset_filters).pack(fill="x", padx=4, pady=(8, 0))
 
         ttk.Separator(r).pack(fill="x", padx=4, pady=8)
 
-        ttk.Label(r, text="Превью").pack(anchor="w", padx=4)
+        ttk.Label(r, text=LANG("preview_section")).pack(anchor="w", padx=4)
         self.var_fit = tk.BooleanVar(value=True)
-        ttk.Checkbutton(r, text="Вписать в окно", variable=self.var_fit,
+        ttk.Checkbutton(r, text=LANG("fit_window"), variable=self.var_fit,
                         command=self._on_fit_toggle).pack(anchor="w", padx=4)
         self.var_zoom = tk.IntVar(value=4)
         head = ttk.Frame(r); head.pack(fill="x", padx=4, pady=(6, 0))
-        ttk.Label(head, text="Масштаб").pack(side="left")
-        self.zoom_lbl = ttk.Label(head, text="авто", foreground="#3d8bff",
+        ttk.Label(head, text=LANG("zoom")).pack(side="left")
+        self.zoom_lbl = ttk.Label(head, text=LANG("zoom_auto"), foreground="#3d8bff",
                                   font=("Segoe UI", 9, "bold"))
         self.zoom_lbl.pack(side="right")
-        self.zoom_scale = ttk.Scale(r, from_=1, to=32, variable=self.var_zoom,
+        self.zoom_scale = ttk.Scale(r, from_=1, to=PARAMS["zoom_max"],
+                                    variable=self.var_zoom,
                                     command=lambda *_: self._on_zoom_change())
         self.zoom_scale.pack(fill="x", padx=4)
 
@@ -1138,17 +1269,17 @@ class App:
 
         # ---- режим рисования ----
         self.var_mode = tk.StringVar(value="smart")
-        ttk.Radiobutton(r, text="Click — точка за точкой",
+        ttk.Radiobutton(r, text=LANG("mode_click"),
                         variable=self.var_mode, value="click").pack(anchor="w", padx=4)
-        ttk.Radiobutton(r, text="Snake — змейкой (надёжно)",
+        ttk.Radiobutton(r, text=LANG("mode_snake"),
                         variable=self.var_mode, value="snake").pack(anchor="w", padx=4)
-        ttk.Radiobutton(r, text="Smart — с умным порядком",
+        ttk.Radiobutton(r, text=LANG("mode_smart"),
                         variable=self.var_mode, value="smart").pack(anchor="w", padx=4)
-        ttk.Radiobutton(r, text="Flood — обход через чёрное",
+        ttk.Radiobutton(r, text=LANG("mode_flood"),
                         variable=self.var_mode, value="flood").pack(anchor="w", padx=4)
 
         self.var_smart_chain = tk.BooleanVar(value=False)
-        ttk.Checkbutton(r, text="Smart: склеивать runs в один штрих",
+        ttk.Checkbutton(r, text=LANG("smart_chain"),
                         variable=self.var_smart_chain).pack(anchor="w", padx=4)
 
         self.warn_lbl = ttk.Label(r, textvariable=self._warn_text,
@@ -1158,29 +1289,27 @@ class App:
         self.warn_lbl.pack(anchor="w", padx=4, pady=(4, 0))
 
         self.var_delay = tk.DoubleVar(value=0.002)
-        self._labeled_slider(r, "Задержка", self.var_delay, 0.0005, 0.05,
+        self._labeled_slider(r, LANG("delay"), self.var_delay, 0.0005, 0.05,
                              "{:.4f} s")
 
         ttk.Separator(r).pack(fill="x", padx=4, pady=8)
 
         row = ttk.Frame(r); row.pack(fill="x", padx=4, pady=(4, 0))
-        ttk.Button(row, text="Показать путь",
+        ttk.Button(row, text=LANG("show_path"),
                    command=self._preview_path).pack(side="left", fill="x", expand=True, padx=(0, 2))
-        ttk.Button(row, text="Тест: 5 точек",
+        ttk.Button(row, text=LANG("test_5dots"),
                    command=self._test_draw).pack(side="left", fill="x", expand=True, padx=(2, 0))
         row = ttk.Frame(r); row.pack(fill="x", padx=4, pady=(4, 0))
-        ttk.Button(row, text="Область по размеру картинки",
+        ttk.Button(row, text=LANG("area_by_size"),
                    command=self._open_area_with_image_size).pack(fill="x")
 
-        self.btn_draw = ttk.Button(r, text="Выбрать область и рисовать",
+        self.btn_draw = ttk.Button(r, text=LANG("start_draw"),
                                    command=self.start_draw)
         self.btn_draw.pack(fill="x", padx=4)
         self.progress = ttk.Progressbar(r, maximum=1.0)
         self.progress.pack(fill="x", padx=4, pady=(8, 0))
         ttk.Label(r,
-                  text="ESC — аварийная остановка.\n"
-                       "Перед выбором области откройте редактор\n"
-                       "и включите инструмент «карандаш 1 px».",
+                  text=LANG("esc_hint"),
                   foreground="#888", justify="left",
                   wraplength=300).pack(anchor="w", padx=4, pady=(8, 8))
 
@@ -1193,7 +1322,7 @@ class App:
     def _on_fit_toggle(self):
         if self.var_fit.get():
             self.zoom_scale.state(["disabled"])
-            self.zoom_lbl.config(text="авто")
+            self.zoom_lbl.config(text=LANG("zoom_auto"))
         else:
             self.zoom_scale.state(["!disabled"])
             self.zoom_lbl.config(text=f"×{int(self.var_zoom.get())}")
@@ -1227,7 +1356,7 @@ class App:
             img = Image.open(path)
             img.load()
         except Exception as e:
-            messagebox.showerror("Ошибка", str(e))
+            messagebox.showerror(LANG("error_title"), str(e))
             return
         # Сохраняем альфу, если есть — понадобится при смене фона
         if img.mode in ("RGBA", "LA") or (
@@ -1336,9 +1465,9 @@ class App:
     def _refresh_warnings(self, *_):
         parts = []
         if self.var_mode.get() == "flood" and self.var_dither.get():
-            parts.append("Dithering + Flood — медленно и неэффективно. Лучше Snake или Smart")
+            parts.append(LANG("warn_dither_flood"))
         if self.var_smooth.get() and self.var_dither.get():
-            parts.append("Dithering + Сгладить — смажет узор.")
+            parts.append(LANG("warn_dither_smooth"))
         self._warn_text.set(("⚠ " + "  •  ".join(parts)) if parts else "")
 
     @staticmethod
@@ -1351,7 +1480,7 @@ class App:
 
     def start_draw(self):
         if not self.bitmap:
-            messagebox.showinfo("Инфо", "Сначала загрузите изображение.")
+            messagebox.showinfo(LANG("info_title"), LANG("need_image"))
             return
         if self.drawing:
             return
@@ -1365,7 +1494,8 @@ class App:
             self.drawing = False
             return
         self.root.withdraw()
-        self.root.after(200, lambda: self._countdown(3, lambda: self._run_draw(area)))
+        cd = PARAMS["countdown_seconds"]
+        self.root.after(200, lambda: self._countdown(cd, lambda: self._run_draw(area)))
 
     def _countdown(self, seconds, callback):
         win = tk.Toplevel(self.root)
@@ -1384,7 +1514,7 @@ class App:
         def tick(n):
             if n <= 0:
                 win.destroy(); callback(); return
-            lbl.config(text=f"Старт через {n}…\nПереключитесь в редактор")
+            lbl.config(text=LANG("countdown_0")+f" {n}…\n"+LANG("countdown_1"))
             win.after(1000, lambda: tick(n - 1))
         tick(seconds)
 
@@ -1431,8 +1561,8 @@ class App:
             return
         mode = self.var_mode.get()
         if mode == "click":
-            messagebox.showinfo("Инфо",
-                                "Click рисует точки, для него нет траектории.")
+            messagebox.showinfo(LANG("info_title"),
+                                LANG("no_path_click"))
             return
 
         strokes = self._get_strokes()
@@ -1475,7 +1605,7 @@ class App:
 
     def _open_area_with_image_size(self):
         if not self.bitmap:
-            messagebox.showinfo("Инфо", "Сначала загрузите изображение.")
+            messagebox.showinfo(LANG("info_title"), LANG("need_image"))
             return
         H = len(self.bitmap); W = len(self.bitmap[0])
         sw = self.root.winfo_screenwidth()
@@ -1491,12 +1621,14 @@ class App:
         if not area:
             return
         self.root.withdraw()
+        cd = PARAMS["countdown_seconds"]
         self.root.after(200, lambda: self._countdown(
-            3, lambda: self._test_draw_run(area)))
+            cd, lambda: self._test_draw_run(area)))
 
     def _test_draw_run(self, area):
         x0, y0, w, h = area
-        delay = max(float(self.var_delay.get()), 0.02)
+        delay = max(float(self.var_delay.get()),
+                    PARAMS["min_click_settle_ms"] / 1000.0)
 
         def worker():
             m = self.drawer._m          # новый бэкенд WinMouse
