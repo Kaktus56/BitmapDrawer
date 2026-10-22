@@ -1,29 +1,29 @@
 {
   "area": [
-    652,
-    631,
-    200,
-    250
+    35,
+    313,
+    648,
+    661
   ],
   "state": {
     "rotate": 0,
     "fill_white": false,
-    "threshold": 103,
+    "threshold": 133,
     "brightness": 80,
-    "contrast": 166,
+    "contrast": 132,
     "saturate": 0,
-    "blur": 3.0,
+    "blur": 1.4634146341463414,
     "sobel": 0.0,
     "edges": true,
     "dither": false,
     "median": false,
     "invert": false,
-    "smooth": true,
+    "smooth": false,
     "mode": "flood",
-    "smart_chain": false,
+    "smart_chain": true,
     "delay": 0.0005,
     "editor": false,
-    "w": 200,
-    "h": 250
+    "w": 300,
+    "h": 300
   }
 }
