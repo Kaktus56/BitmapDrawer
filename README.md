@@ -1,7 +1,7 @@
 # Bitmap Drawer 🖱️🎨
 *(Also known as a modern, open-source alternative to ImageToMouse)*
 
-![Icon](assets/BitmaperDrawwer.png)
+![Icon](assets/icon.png)
 
 <details open>
 <summary><b>🇬🇧 Read in English (Click to collapse)</b></summary>
