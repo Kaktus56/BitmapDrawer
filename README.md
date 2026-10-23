@@ -32,7 +32,7 @@ If you are looking for an **ImageToMouse** alternative that works flawlessly wit
 ![Filters Demo](assets/demo_filters.gif)
 
 ## 🚀 How to Use (Ready-to-run build)
-1. Go to the [Releases](../../releases) page.
+1. Go to the [Releases](https://github.com/Kaktus56/BitmapDrawer/releases) page.
 2. Download the latest `BitmapDrawer.zip` archive or one executable file `BitmapDrawer.exe`.
 3. Extract the archive to any folder on your PC.
 4. Run `BitmapDrawer.exe`. No Python installation is required.
@@ -108,7 +108,7 @@ _Настройка фильтров в реальном времени:_
 
 ## 🚀 Как использовать (Готовая сборка)
 
-1. Перейдите на страницу [Releases](https://../releases).
+1. Перейдите на страницу [Releases](https://github.com/Kaktus56/BitmapDrawer/releases).
     
 2. Скачайте последний архив `BitmapDrawer.zip` или одиночный файл `BitmapDrawer.exe`.
     
