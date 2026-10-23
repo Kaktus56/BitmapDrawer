@@ -81,7 +81,7 @@ To change the language, simply replace the `lang.json` file with `lang_en.json` 
 
 Если вы ищете **альтернативу ImageToMouse**, которая работает безупречно без внешних сайтов, справляется со сложными изображениями и позволяет остановить процесс горячей клавишей — этот инструмент для вас. Идеально подходит для создания пиксель-арта, рисования в MS Paint/Krita или автоматизации тестирования интерфейсов.
 
-[https://assets/screenshot.png](https://assets/screenshot.png)
+![Screenshot](assets/screenshot.png)
 
 ## ✨ Возможности
 
@@ -101,10 +101,10 @@ To change the language, simply replace the `lang.json` file with `lang_en.json` 
 ## 🎬 Демонстрация
 
 _Сравнение режимов рисования (Click, Snake, Smart, Flood):_  
-[https://assets/demo_modes.gif](https://assets/demo_modes.gif)
+![Drawing Modes Demo](assets/demo_modes.gif)
 
 _Настройка фильтров в реальном времени:_  
-[https://assets/demo_filters.gif](https://assets/demo_filters.gif)
+![Filters Demo](assets/demo_filters.gif)
 
 ## 🚀 Как использовать (Готовая сборка)
 
