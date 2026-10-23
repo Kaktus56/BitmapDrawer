@@ -160,3 +160,7 @@ pip install pyinstaller
 - **Enter:** Подтвердить выбор области.
     
 </details>
+
+📝 License
+
+This project is licensed under the MIT License. / Этот проект распространяется под лицензией MIT.
